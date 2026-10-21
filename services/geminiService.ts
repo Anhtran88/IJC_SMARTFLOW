@@ -8,7 +8,7 @@ import { parseVNNumber, parseSmartNumber, detectDocumentNumberConvention, normal
 import { createGeminiRunner } from "./geminiRetry";
 import { requestBm02Extraction } from "./ocrApi";
 
-const GEMINI_API_KEY = "AIzaSyBGGB-sv14glJdCWxc2ppGNDrf7Nuuj4qg";
+const GEMINI_API_KEY = process.env.API_KEY || "";
 
 function repairIncompleteJson(jsonStr: string, fallback: any = {}): any {
   if (!jsonStr || jsonStr.trim() === "{" || jsonStr.trim() === "[]" || jsonStr.trim() === "") {

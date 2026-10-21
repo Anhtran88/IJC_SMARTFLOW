@@ -501,14 +501,6 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ theo cấu trúc:
   server.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
-
-  server.on("error", (err: any) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`[Server] Port ${PORT} is already in use. Please ensure no other process is bound to port ${PORT}.`);
-    } else {
-      console.error("[Server] Startup error:", err);
-    }
-  });
 }
 
 startServer();
