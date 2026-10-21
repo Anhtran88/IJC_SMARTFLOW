@@ -29,8 +29,6 @@
         window.addEventListener('unhandledrejection', function(event) {
           const reasonStr = (event.reason && (event.reason.message || event.reason.stack || String(event.reason))) || '';
           if (
-            reasonStr.includes('WebSocket') || 
-            reasonStr.includes('vite') ||
             reasonStr.includes('Could not reach Cloud Firestore backend') ||
             reasonStr.includes('Backend didn\'t respond within 10 seconds')
           ) {

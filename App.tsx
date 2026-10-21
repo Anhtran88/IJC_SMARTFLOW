@@ -5281,6 +5281,10 @@ export default function App() {
 
     try {
       const reader = new FileReader();
+      reader.onerror = () => {
+        setError('Không đọc được tệp tải lên. Vui lòng chọn lại tệp.');
+        setIsProcessing(false);
+      };
       reader.onload = async () => {
         try {
           const mimeType = file.type || 'application/pdf';
@@ -5307,6 +5311,7 @@ export default function App() {
         }
       };
       reader.readAsDataURL(file);
+      event.target.value = '';
     } catch (err: any) {
       setError(err.message || "Đã có lỗi xảy ra.");
       setIsProcessing(false);

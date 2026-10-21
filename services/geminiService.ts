@@ -5,6 +5,9 @@ import { isTemplateCodeOnly, isValidMaPhieu, extractMaPhieuFromFileName, formatS
 import { cleanProposerName } from "../src/utils/proposerUtils";
 import { parseVNNumber, parseSmartNumber, detectDocumentNumberConvention, normalizeMultilineContent } from "../src/lib/formatUtils";
 
+import { createGeminiRunner } from "./geminiRetry";
+import { requestBm02Extraction } from "./ocrApi";
+
 const GEMINI_API_KEY = "AIzaSyBGGB-sv14glJdCWxc2ppGNDrf7Nuuj4qg";
 
 function repairIncompleteJson(jsonStr: string, fallback: any = {}): any {
@@ -101,107 +104,9 @@ function safeParse(data: any, fallback: any = {}) {
   }
 }
 
-// Client-side model cooldown tracker for quota limits (429)
-const clientModelCooldowns: Record<string, number> = {};
-
-async function callGeminiWithRetry(
-  ai: GoogleGenAI,
-  makeParams: (model: string) => any,
-  models = [
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-3.8-flash',
-    'gemini-flash-latest',
-    'gemini-flash-lite-latest',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite'
-  ],
-  maxRetriesPerModel = 1
-) {
-  let lastError: any = null;
-  const now = Date.now();
-
-  const sortedModels = [...models].sort((a, b) => {
-    const coolA = clientModelCooldowns[a] && clientModelCooldowns[a] > now ? 1 : 0;
-    const coolB = clientModelCooldowns[b] && clientModelCooldowns[b] > now ? 1 : 0;
-    return coolA - coolB;
-  });
-
-  for (const model of sortedModels) {
-    if (clientModelCooldowns[model] && clientModelCooldowns[model] > now) {
-      console.warn(`[Gemini Client] Model ${model} is in cooldown (${Math.round((clientModelCooldowns[model] - now) / 1000)}s remaining). Skipping to fallback model...`);
-      continue;
-    }
-
-    for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
-      try {
-        const result = await ai.models.generateContent(makeParams(model));
-        delete clientModelCooldowns[model];
-        return result;
-      } catch (error: any) {
-        lastError = error;
-        const errorStr = (error?.message || '') + ' ' + JSON.stringify(error || '');
-        
-        const isQuota =
-          error?.status === 'RESOURCE_EXHAUSTED' ||
-          error?.code === 429 ||
-          errorStr.includes('RESOURCE_EXHAUSTED') ||
-          errorStr.includes('429') ||
-          errorStr.includes('Quota exceeded') ||
-          errorStr.includes('rate-limits');
-
-        if (isQuota) {
-          // Immediately mark cooldown and break to next model without wasting retries
-          clientModelCooldowns[model] = Date.now() + 60000;
-          console.warn(
-            `[Gemini Client] Model ${model} quota exhausted (429). Switching immediately to fallback model...`
-          );
-          break;
-        }
-
-        const isUnavailable =
-          error?.status === 'UNAVAILABLE' ||
-          error?.code === 503 ||
-          errorStr.includes('503') ||
-          errorStr.includes('UNAVAILABLE') ||
-          errorStr.includes('high demand') ||
-          errorStr.includes('overloaded');
-
-        if (isUnavailable) {
-          // Model returned 503. Set 45s cooldown on this model
-          clientModelCooldowns[model] = Date.now() + 45000;
-          console.warn(
-            `[Gemini Client] Model ${model} returned transient error (503). Setting temporary cooldown and checking next candidate model...`
-          );
-
-          // Check if another candidate model is available
-          const hasOtherCandidate = models.some(
-            (m) => m !== model && (!clientModelCooldowns[m] || clientModelCooldowns[m] <= Date.now())
-          );
-
-          if (hasOtherCandidate) {
-            break; // Switch immediately
-          }
-
-          if (attempt < maxRetriesPerModel) {
-            const delay = 1200;
-            console.warn(
-              `[Gemini Client] No other model available. Retrying ${model} in ${delay}ms... (Attempt ${attempt + 1}/${maxRetriesPerModel + 1})`
-            );
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          } else {
-            break;
-          }
-        } else {
-          console.warn(
-            `[Gemini Client] Model ${model} failed on attempt ${attempt + 1} (${error?.message || error}). Trying next candidate model if available.`
-          );
-          break;
-        }
-      }
-    }
-  }
-  throw lastError;
+const runClientGemini = createGeminiRunner();
+async function callGeminiWithRetry(ai: GoogleGenAI, makeParams: (model: string) => any) {
+  return runClientGemini(model => ai.models.generateContent(makeParams(model)));
 }
 
 export interface ExtractionResult {
@@ -663,57 +568,7 @@ export interface OcrPreviewData {
 }
 
 export async function extractBm02Ocr(fileBase64: string, mimeType: string, fileName: string): Promise<OcrPreviewData> {
-  let rawData: any = null;
-
-  try {
-    const res = await fetch('/api/gemini/extract-bm02', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileData: fileBase64, mimeType, fileName })
-    });
-    if (res.ok) {
-      const body = await res.json();
-      if (body.success && body.data) {
-        rawData = body.data;
-      }
-    }
-  } catch (e) {
-    console.warn('Server OCR endpoint call failed, falling back to client extraction:', e);
-  }
-
-  // Fallback if server call returned null
-  if (!rawData) {
-    const result = await extractDataFromFile(fileBase64, mimeType);
-    const rBM02 = result?.bm02 || ({} as any);
-    const rBBNT = result?.bbnt || ({} as any);
-    rawData = {
-      maPhieu: (rBM02 as any).maPhieu || '',
-      congTrinh: (rBBNT as any)?.doiTuong?.congTrinh || '',
-      hangMuc: rBM02.title || rBBNT.category || '',
-      nhaCungCap: rBM02.proposingCompany || '',
-      proposingCompany: rBM02.proposingCompany || '',
-      ngayBaoGia: rBM02.date || '',
-      diaDiem: rBM02.mucDichSuDungDiaDiem || rBBNT.address || '',
-      soTienBangChu: rBM02.soTienBangChu || '',
-      thoiHanThanhToan: rBM02.thoiHanThanhToan || '',
-      nguoiDeNghi: (rBM02 as any).nguoiDeNghi || (rawData as any)?.nguoiDeNghi || '',
-      truongBoPhan: (rBM02 as any).truongBoPhan || (rawData as any)?.truongBoPhan || '',
-      thuKho: (rBM02 as any).thuKho || (rawData as any)?.thuKho || '',
-      items: (rBM02.items || []).map((it: any, idx: number) => ({
-        stt: idx + 1,
-        name: it.name || '',
-        unit: it.unit || 'm3',
-        rawQuantity: it.rawQuantity || String(it.quantity || ''),
-        rawUnitPrice: it.rawUnitPrice || String(it.unitPrice || ''),
-        rawTotal: it.rawTotal || String(it.total || ''),
-        quantity: Number(it.quantity) || 0,
-        unitPrice: Number(it.unitPrice) || 0,
-        total: (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0),
-        note: it.note || '',
-        needsCheck: !it.unitPrice || Number(it.unitPrice) <= 0 || !it.quantity || Number(it.quantity) <= 0
-      }))
-    };
-  }
+  const rawData = await requestBm02Extraction(fileBase64, mimeType, fileName);
   if (rawData.hangMuc) {
     rawData.hangMuc = normalizeMultilineContent(rawData.hangMuc);
   }
