@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net default deny (will be overridden by explicit path rules)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // Rules for estimateItems
+    match /estimateGroups/{groupId} {
+      allow read, write: if true;
+    }
+
+    match /estimateItems/{itemId} {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Rules for bm06Orders
+    match /bm06Orders/{orderId} {
+      allow read, write: if true;
+    }
+
+    // Rules for bm02Orders
+    match /bm02Orders/{docId} {
+      allow read, write: if true;
+    }
+
+    // Rules for bm032Orders
+    match /bm032Orders/{docId} {
+      allow read, write: if true;
+    }
+
+    // Rules for bbntOrders
+    match /bbntOrders/{docId} {
+      allow read, write: if true;
+    }
+
+    // Rules for materialTypeConfigs
+    match /materialTypeConfigs/{materialTypeId} {
+      allow read, write: if true;
+    }
+
+    // Rules for personnelDirectory
+    match /personnelDirectory/{personId} {
+      allow read, write: if true;
+    }
+
+    // Rules for MaterialUnitTransactions
+    match /MaterialUnitTransactions/{txId} {
+      allow read, write: if true;
+    }
+    match /materialUnitTransactions/{txId} {
+      allow read, write: if true;
+    }
+
+    // Rules for system_backups
+    match /projects/{projectId} {
+      allow read, write: if true;
+    }
+    match /lichSu/{docId} {
+      allow read, write: if true;
+    }
+    match /system_backups/{backupId} {
+      allow read, write: if true;
+    }
+    match /system_backups/{backupId}/chunks/{chunkId} {
+      allow read, write: if true;
+    }
+  }
+}

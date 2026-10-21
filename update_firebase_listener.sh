@@ -1,0 +1,1 @@
+sed -i "1s/.*/import { ref, onValue, Database } from 'firebase\\/database';\nimport { doc, collection, onSnapshot, getFirestore } from 'firebase\\/firestore';/" src/services/FirebaseListenerManager.ts

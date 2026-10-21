@@ -1,0 +1,8 @@
+{
+  "name": "Remix IJC_SMARTFLOW_v1.6",
+  "description": "BTI Group AI-powered system for automated document extraction, multi-format export (DOCX, Excel, PDF), and real-time Firebase data integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

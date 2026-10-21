@@ -1,0 +1,26 @@
+            // Auto-cleanup invalid/placeholder/virtual materials from Firebase
+            if (!isValid) {
+              remove(ref(db, `estimateItems/${key}`)).catch(err => {
+                console.error("Auto-cleanup failed for invalid item in Realtime DB:", key, err);
+              });
+              return; // Skip adding to the list
+            }
+
+            if (!item.isArchived) {
+              // Guarantee fully populated fields and calculate values safely
+              const est = Number(item.estimatedQty || 0);
+              const cum = Number(item.cumulativeQty || 0);
+              const rem = est - cum;
+              let status: 'NORMAL' | 'NEARLY_EMPTY' | 'EXCEEDED' = 'NORMAL';
+              if (rem <= 0) {
+                status = 'EXCEEDED';
+              } else if (rem < est * 0.1) {
+                status = 'NEARLY_EMPTY';
+              }
+
+              list.push({
+                ...item,
+                id: key,
+                estimatedQty: est,
+                cumulativeQty: cum,
+                remainingQty: rem,

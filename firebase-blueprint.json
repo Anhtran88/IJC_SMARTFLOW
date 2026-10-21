@@ -1,0 +1,120 @@
+{
+  "entities": {
+    "EstimateItem": {
+      "title": "EstimateItem",
+      "description": "An item parsed from the Excel design estimate (DUTOAN) indicating the expected quantity of materials.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique id (UUID)" },
+        "projectId": { "type": "string", "description": "The ID of the project" },
+        "unitId": { "type": "string", "description": "The ID of the unit" },
+        "code": { "type": "string", "description": "Mã số (e.g. TT, A33.0868)" },
+        "name": { "type": "string", "description": "Full description/name of the material" },
+        "unit": { "type": "string", "description": "Đơn vị tính (e.g. m2, kg, m)" },
+        "estimatedQty": { "type": "number", "description": "The estimated quantity needed" },
+        "basePrice": { "type": "number", "description": "The base price of the material (optional)" },
+        "cumulativeQty": { "type": "number", "description": "Cumulative total ordered/delivered quantities across periods" },
+        "remainingQty": { "type": "number", "description": "Remaining quantity of material left to order" },
+        "lastOrderDate": { "type": "string", "description": "Optional last order date" },
+        "lastOrderQty": { "type": "number", "description": "Optional last order quantity" },
+        "warningStatus": { "type": "string", "enum": ["NORMAL", "NEARLY_EMPTY", "EXCEEDED"], "description": "Status code relative to estimate depletion" },
+        "category": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectId", "unitId", "code", "name", "unit", "estimatedQty", "cumulativeQty", "remainingQty", "warningStatus"]
+    },
+    "BM06Order": {
+      "title": "BM06Order",
+      "description": "A BM06 order proposal document indicating required materials, purpose, location and approval progress.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "unitId": { "type": "string" },
+        "orderDate": { "type": "string" },
+        "purpose": { "type": "string" },
+        "location": { "type": "string" },
+        "company": { "type": "string" },
+        "items": { "type": "array" },
+        "proposer": { "type": "string" },
+        "proposerDate": { "type": "string" },
+        "storekeeper": { "type": "string" },
+        "storekeeperDate": { "type": "string" },
+        "departmentHead": { "type": "string" },
+        "departmentHeadDate": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "projectId", "unitId", "orderDate", "purpose", "location", "company", "items"]
+    },
+    "BM02Order": {
+      "title": "BM02Order",
+      "description": "A BM02 financial approval document auto-generated from BM06 or PDF.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docNumber": { "type": "string" },
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "location": { "type": "string" },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "sourceType": { "type": "string", "enum": ["BM06", "PDF"] }
+      },
+      "required": ["id", "docNumber", "title", "date", "items", "totalAmount"]
+    },
+    "BM032Order": {
+      "title": "BM032Order",
+      "description": "A BM03.2 material handover and acceptance document auto-generated from BM06 or PDF.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "docNumber": { "type": "string" },
+        "location": { "type": "string" },
+        "date": { "type": "string" },
+        "items": { "type": "array" },
+        "sourceType": { "type": "string", "enum": ["BM06", "PDF"] }
+      },
+      "required": ["id", "docNumber", "date", "items"]
+    },
+    "MaterialTypeConfig": {
+      "title": "MaterialTypeConfig",
+      "description": "Content template configuration for BM06, BM02, and BM03.2 specific to a material type.",
+      "type": "object",
+      "properties": {
+        "materialTypeId": { "type": "string" },
+        "name": { "type": "string" },
+        "bm06": { "type": "object" },
+        "bm02": { "type": "object" },
+        "bm032": { "type": "object" },
+        "updatedAt": { "type": "number" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["materialTypeId", "name", "bm06", "bm02", "bm032"]
+    }
+  },
+  "firestore": {
+    "estimateItems/{itemId}": {
+      "schema": "EstimateItem",
+      "description": "Collection of material estimate items for projects."
+    },
+    "bm06Orders/{orderId}": {
+      "schema": "BM06Order",
+      "description": "Collection of BM06 order documents."
+    },
+    "bm02Orders/{docId}": {
+      "schema": "BM02Order",
+      "description": "Collection of BM02 approval and budget documents."
+    },
+    "bm032Orders/{docId}": {
+      "schema": "BM032Order",
+      "description": "Collection of BM03.2 acceptance and transfer documents."
+    },
+    "materialTypeConfigs/{materialTypeId}": {
+      "schema": "MaterialTypeConfig",
+      "description": "Collection of configurations per material type."
+    }
+  }
+}
