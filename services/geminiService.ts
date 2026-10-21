@@ -5,7 +5,7 @@ import { isTemplateCodeOnly, isValidMaPhieu, extractMaPhieuFromFileName, formatS
 import { cleanProposerName } from "../src/utils/proposerUtils";
 import { parseVNNumber, parseSmartNumber, detectDocumentNumberConvention, normalizeMultilineContent } from "../src/lib/formatUtils";
 
-const GEMINI_API_KEY = "AIzaSyBGGB-sv14glJdCWxc2ppGNDrf7Nuuj4qg";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY || "";
 
 function repairIncompleteJson(jsonStr: string, fallback: any = {}): any {
   if (!jsonStr || jsonStr.trim() === "{" || jsonStr.trim() === "[]" || jsonStr.trim() === "") {
@@ -107,16 +107,8 @@ const clientModelCooldowns: Record<string, number> = {};
 async function callGeminiWithRetry(
   ai: GoogleGenAI,
   makeParams: (model: string) => any,
-  models = [
-    'gemini-3.6-flash',
-    'gemini-3.5-flash',
-    'gemini-3.8-flash',
-    'gemini-flash-latest',
-    'gemini-flash-lite-latest',
-    'gemini-3.5-flash-lite',
-    'gemini-3.1-flash-lite'
-  ],
-  maxRetriesPerModel = 1
+  models = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-3.8-flash'],
+  maxRetriesPerModel = 2
 ) {
   let lastError: any = null;
   const now = Date.now();
@@ -129,7 +121,7 @@ async function callGeminiWithRetry(
 
   for (const model of sortedModels) {
     if (clientModelCooldowns[model] && clientModelCooldowns[model] > now) {
-      console.warn(`[Gemini Client] Model ${model} is in cooldown (${Math.round((clientModelCooldowns[model] - now) / 1000)}s remaining). Skipping to fallback model...`);
+      console.warn(`[Gemini Client] Model ${model} is in cooldown. Skipping to fallback model...`);
       continue;
     }
 
@@ -151,7 +143,6 @@ async function callGeminiWithRetry(
           errorStr.includes('rate-limits');
 
         if (isQuota) {
-          // Immediately mark cooldown and break to next model without wasting retries
           clientModelCooldowns[model] = Date.now() + 60000;
           console.warn(
             `[Gemini Client] Model ${model} quota exhausted (429). Switching immediately to fallback model...`
@@ -164,34 +155,16 @@ async function callGeminiWithRetry(
           error?.code === 503 ||
           errorStr.includes('503') ||
           errorStr.includes('UNAVAILABLE') ||
-          errorStr.includes('high demand') ||
-          errorStr.includes('overloaded');
+          errorStr.includes('high demand');
 
-        if (isUnavailable) {
-          // Model returned 503. Set 45s cooldown on this model
-          clientModelCooldowns[model] = Date.now() + 45000;
+        if (isUnavailable && attempt < maxRetriesPerModel) {
+          const baseDelay = 1000;
+          const maxDelay = 8000;
+          const delay = Math.min(maxDelay, baseDelay * Math.pow(2, attempt) + Math.random() * 500);
           console.warn(
-            `[Gemini Client] Model ${model} returned transient error (503). Setting temporary cooldown and checking next candidate model...`
+            `[Gemini Client] Model ${model} transient issue (${error?.status || error?.code || 'busy'}). Retrying in ${Math.round(delay)}ms... (Attempt ${attempt + 1}/${maxRetriesPerModel + 1})`
           );
-
-          // Check if another candidate model is available
-          const hasOtherCandidate = models.some(
-            (m) => m !== model && (!clientModelCooldowns[m] || clientModelCooldowns[m] <= Date.now())
-          );
-
-          if (hasOtherCandidate) {
-            break; // Switch immediately
-          }
-
-          if (attempt < maxRetriesPerModel) {
-            const delay = 1200;
-            console.warn(
-              `[Gemini Client] No other model available. Retrying ${model} in ${delay}ms... (Attempt ${attempt + 1}/${maxRetriesPerModel + 1})`
-            );
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          } else {
-            break;
-          }
+          await new Promise(resolve => setTimeout(resolve, delay));
         } else {
           console.warn(
             `[Gemini Client] Model ${model} failed on attempt ${attempt + 1} (${error?.message || error}). Trying next candidate model if available.`
@@ -201,7 +174,29 @@ async function callGeminiWithRetry(
       }
     }
   }
-  throw lastError;
+
+  const finalErrStr = (lastError?.message || '') + ' ' + JSON.stringify(lastError || '');
+  const isQuotaFinal =
+    lastError?.status === 'RESOURCE_EXHAUSTED' ||
+    lastError?.code === 429 ||
+    finalErrStr.includes('RESOURCE_EXHAUSTED') ||
+    finalErrStr.includes('429') ||
+    finalErrStr.includes('Quota exceeded');
+
+  const isUnavailableFinal =
+    lastError?.status === 'UNAVAILABLE' ||
+    lastError?.code === 503 ||
+    finalErrStr.includes('503') ||
+    finalErrStr.includes('UNAVAILABLE') ||
+    finalErrStr.includes('high demand');
+
+  if (isQuotaFinal) {
+    throw new Error("Hạn mức API Gemini đã cạn kiệt (429 RESOURCE_EXHAUSTED). Vui lòng thử lại sau ít phút.");
+  } else if (isUnavailableFinal) {
+    throw new Error("Hệ thống AI đang quá tải (503 High Demand). Vui lòng thử lại sau ít phút hoặc thử với tệp tài liệu khác.");
+  } else {
+    throw new Error(lastError?.message || "Lỗi xử lý AI không xác định.");
+  }
 }
 
 export interface ExtractionResult {

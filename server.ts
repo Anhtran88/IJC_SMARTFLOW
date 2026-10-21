@@ -12,7 +12,7 @@ dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.DEFAULT_APP_PORT ? parseInt(process.env.DEFAULT_APP_PORT, 10) : 3000;
+  const PORT = 3000;
 
   // Increase payload limit for large base64 images/PDFs
   app.use(express.json({ limit: "50mb" }));
@@ -36,16 +36,16 @@ async function startServer() {
   const modelCooldowns: Record<string, number> = {};
 
   async function generateWithRetryAndFallback(params: any) {
-    // Primary model is gemini-3.1-flash-lite (high speed, separate quota)
-    // Fallback model is gemini-3.8-flash
     const candidateModels = [
+      "gemini-3.5-flash-lite",
       "gemini-3.1-flash-lite",
+      "gemini-2.5-flash",
       "gemini-3.8-flash",
     ];
     let lastError: any = null;
     const now = Date.now();
+    const maxRetriesPerModel = 2;
 
-    // Prioritize models that are not in cooldown
     const sortedModels = [...candidateModels].sort((a, b) => {
       const coolA = modelCooldowns[a] && modelCooldowns[a] > now ? 1 : 0;
       const coolB = modelCooldowns[b] && modelCooldowns[b] > now ? 1 : 0;
@@ -58,13 +58,12 @@ async function startServer() {
         continue;
       }
 
-      for (let attempt = 0; attempt < 2; attempt++) {
+      for (let attempt = 0; attempt <= maxRetriesPerModel; attempt++) {
         try {
           const result = await ai.models.generateContent({
             ...params,
             model,
           });
-          // Model succeeded, clear any previous cooldown
           delete modelCooldowns[model];
           return result;
         } catch (err: any) {
@@ -80,12 +79,11 @@ async function startServer() {
             errStr.includes("rate-limits");
 
           if (isQuota) {
-            // Quota exhausted on this model. Set cooldown for 60 seconds and switch to fallback model immediately
             modelCooldowns[model] = Date.now() + 60000;
             console.warn(
               `[Gemini] Model ${model} quota exhausted (429). Switching immediately to next available model...`
             );
-            break; // Do not retry this model, try next candidate
+            break;
           }
 
           const isUnavailable =
@@ -95,10 +93,12 @@ async function startServer() {
             errStr.includes("UNAVAILABLE") ||
             errStr.includes("high demand");
 
-          if (isUnavailable && attempt < 1) {
-            const delay = 1200;
+          if (isUnavailable && attempt < maxRetriesPerModel) {
+            const baseDelay = 1000;
+            const maxDelay = 8000;
+            const delay = Math.min(maxDelay, baseDelay * Math.pow(2, attempt) + Math.random() * 500);
             console.warn(
-              `[Gemini] Model ${model} returned transient error (${err?.status || err?.code || "busy"}). Retrying in ${delay}ms... (Attempt ${attempt + 1}/2)`
+              `[Gemini] Model ${model} returned transient error (${err?.status || err?.code || "busy"}). Retrying in ${Math.round(delay)}ms... (Attempt ${attempt + 1}/${maxRetriesPerModel + 1})`
             );
             await new Promise((r) => setTimeout(r, delay));
           } else {
@@ -111,7 +111,28 @@ async function startServer() {
       }
     }
 
-    throw lastError;
+    const finalErrStr = (lastError?.message || "") + " " + JSON.stringify(lastError || "");
+    const isQuotaFinal =
+      lastError?.status === "RESOURCE_EXHAUSTED" ||
+      lastError?.code === 429 ||
+      finalErrStr.includes("RESOURCE_EXHAUSTED") ||
+      finalErrStr.includes("429") ||
+      finalErrStr.includes("Quota exceeded");
+
+    const isUnavailableFinal =
+      lastError?.status === "UNAVAILABLE" ||
+      lastError?.code === 503 ||
+      finalErrStr.includes("503") ||
+      finalErrStr.includes("UNAVAILABLE") ||
+      finalErrStr.includes("high demand");
+
+    if (isQuotaFinal) {
+      throw new Error("Hạn mức API Gemini đã cạn kiệt (429 RESOURCE_EXHAUSTED). Vui lòng thử lại sau ít phút.");
+    } else if (isUnavailableFinal) {
+      throw new Error("Hệ thống AI đang quá tải (503 High Demand). Vui lòng thử lại sau ít phút hoặc thử với tệp tài liệu khác.");
+    } else {
+      throw new Error(lastError?.message || "Lỗi xử lý AI không xác định.");
+    }
   }
 
   function repairIncompleteJson(jsonStr: string): any {
@@ -541,11 +562,7 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ theo cấu trúc:
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server: {
-        middlewareMode: true,
-        hmr: false,
-        allowedHosts: true,
-      },
+      server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
@@ -557,16 +574,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ theo cấu trúc:
     });
   }
 
-  const server = app.listen(PORT, "0.0.0.0", () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-  });
-
-  server.on("error", (err: any) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`[Server] Port ${PORT} is already in use. Please ensure no other process is bound to port ${PORT}.`);
-    } else {
-      console.error("[Server] Startup error:", err);
-    }
   });
 }
 
